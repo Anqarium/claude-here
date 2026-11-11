@@ -187,8 +187,13 @@ public:
     }
 
     // IExplorerCommand
+    // Başlık Windows arayüz diline göre: Türkçe, değilse İngilizce.
     IFACEMETHODIMP GetTitle(IShellItemArray*, PWSTR* name) override {
-        return SHStrDupW(kind_ == Kind::Terminal ? L"Claude Code'da Aç" : L"Claude Masaüstünde Aç", name);
+        bool tr = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_TURKISH;
+        const wchar_t* title = kind_ == Kind::Terminal
+            ? (tr ? L"Claude Code'da Aç" : L"Open in Claude Code")
+            : (tr ? L"Claude Masaüstünde Aç" : L"Open in Claude Desktop");
+        return SHStrDupW(title, name);
     }
     IFACEMETHODIMP GetIcon(IShellItemArray*, PWSTR* icon) override {
         std::wstring exe = kind_ == Kind::Terminal ? ClaudeCliPath() : DesktopExePath();

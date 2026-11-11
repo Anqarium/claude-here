@@ -22,5 +22,11 @@ Windows 11 sağ tık menüsüne "Claude Code'da Aç" ve "Claude Masaüstünde A�
 - CLSID'ler `src/ClaudeHere.cpp` ve `install.ps1`'de; ikisi birlikte değişmeli.
 - Masaüstü derin bağlantısı `claude://code/new?folder=<encodeURIComponent>`, Claude masaüstü
   uygulamasının kendi `ccd` takma adının ürettiği biçim (app.asar'dan okundu).
+- Dil: menü başlığı `GetUserDefaultUILanguage` (Windows arayüz dili, Explorer'ın kullandığı) ile
+  seçilir, paket adı kurulumda `Get-UICulture` ile. Windows Terminal ise dil tercih listesini
+  izler; bu makinede arayüz `en-US`, liste `tr` önde olduğu için "Terminalde Aç" Türkçe görünür.
+- Masaüstü `folder` bağlantısı (`src=external`) her seferinde onay ister; uygulamanın güvenlik
+  kararı, aşılmaz. Masaüstünün güven listesi (`localAgentModeTrustedFolders`) CLI'nin
+  `~/.claude.json` listesinden ayrı.
 - Menünün kendisi otomatik test edilemiyor; COM tarafı `CoCreateInstance` + `GetTitle`/`GetState`/
   `Invoke` çağıran küçük bir probe ile doğrulandı (2026-11-12).

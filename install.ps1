@@ -43,10 +43,15 @@ function Write-Logos([string]$exe, [string]$assets) {
   $src.Dispose(); $icon.Dispose()
 }
 
+# Paket adları (App extensions sayfası) kurulum anındaki Windows arayüz diline göre;
+# menü yazılarını ise DLL her açılışta kendisi seçer.
+$tr = (Get-UICulture).TwoLetterISOLanguageName -eq 'tr'
 $commands = @(
-  @{ Name = 'ClaudeHere.Terminal'; Folder = 'Terminal'; Display = 'Claude Code (sağ tık)'; Verb = 'ClaudeCode'
+  @{ Name = 'ClaudeHere.Terminal'; Folder = 'Terminal'; Verb = 'ClaudeCode'
+     Display = $(if ($tr) { 'Claude Code (sağ tık)' } else { 'Claude Code (context menu)' })
      Clsid = '0f55b8ab-4947-4eab-b1f7-4e8c0db27ac9'; Exe = Find-ClaudeCli },
-  @{ Name = 'ClaudeHere.Desktop'; Folder = 'Desktop'; Display = 'Claude Masaüstü (sağ tık)'; Verb = 'ClaudeDesktop'
+  @{ Name = 'ClaudeHere.Desktop'; Folder = 'Desktop'; Verb = 'ClaudeDesktop'
+     Display = $(if ($tr) { 'Claude Masaüstü (sağ tık)' } else { 'Claude Desktop (context menu)' })
      Clsid = '59847620-2a77-4b45-ad83-ef512e443b3b'; Exe = Find-DesktopExe }
 )
 

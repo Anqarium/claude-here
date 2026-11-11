@@ -9,6 +9,12 @@ Windows 11'in yeni (kısa) sağ tık menüsüne iki girdi ekler:
 
 Her ikisi de klasöre sağ tıklayınca ve klasörün içinde boşluğa sağ tıklayınca çıkar.
 
+Yazılar Windows arayüz diline göre: Türkçe arayüzde yukarıdaki gibi, diğer dillerde
+İngilizce (**Open in Claude Code**, **Open in Claude Desktop**).
+
+Masaüstü girdisi her tıklamada bir onay sorar: Claude masaüstü uygulaması başka bir
+uygulamadan gelen klasörü güvenlik gereği her zaman onaya sunar.
+
 ## Nasıl çalışır
 
 `IExplorerCommand` uygulayan küçük bir C++ COM DLL'i (`src/ClaudeHere.cpp`), her komut için
