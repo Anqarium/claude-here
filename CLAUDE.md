@@ -33,6 +33,10 @@ can only be checked by hand.
 - The two commands are deliberately separate packages (`ClaudeHere.Terminal`,
   `ClaudeHere.Desktop`): Windows may group several verbs of one package into a submenu.
 - The CLSIDs live in both `src/ClaudeHere.cpp` and `install.ps1`; change them together.
+- Menu icons: `GetIcon` returns `icon.ico` next to the DLL, falling back to the exe's icon 0.
+  `install.ps1` generates it from each exe, cropped to the visible area, because the CLI's
+  own icon has about 2 px of padding at 32 px and the desktop app's has none (they looked
+  different in size). No icon art is committed to the repo.
 - Language: the menu title uses `GetUserDefaultUILanguage` (the display language Explorer
   uses); the package name uses `Get-UICulture` at install time. Windows Terminal follows the
   preferred-languages list instead, so its own entry can be in a different language.

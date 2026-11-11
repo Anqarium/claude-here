@@ -25,11 +25,66 @@ function Find-ClaudeCli {
   return $null
 }
 
+function Get-ExeIcon([string]$exe) {
+  $icon = try { [System.Drawing.Icon]::ExtractIcon($exe, 0, 256) } catch { $null }
+  if (-not $icon) { $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe) }
+  return $icon
+}
+
+# The menu icon. The two exes' own icons have different built-in padding (the CLI's is
+# smaller), so each is cropped to its visible area and centred on a square: both then fill
+# the same share of the menu slot. Written as a multi-size ICO of PNG frames.
+function Write-MenuIcon([string]$exe, [string]$path) {
+  $icon = Get-ExeIcon $exe
+  $src = $icon.ToBitmap()
+  $minX = $src.Width; $minY = $src.Height; $maxX = -1; $maxY = -1
+  for ($y = 0; $y -lt $src.Height; $y++) {
+    for ($x = 0; $x -lt $src.Width; $x++) {
+      if ($src.GetPixel($x, $y).A -gt 20) {
+        if ($x -lt $minX) { $minX = $x }; if ($x -gt $maxX) { $maxX = $x }
+        if ($y -lt $minY) { $minY = $y }; if ($y -gt $maxY) { $maxY = $y }
+      }
+    }
+  }
+  if ($maxX -lt 0) { $minX = 0; $minY = 0; $maxX = $src.Width - 1; $maxY = $src.Height - 1 }
+  $w = $maxX - $minX + 1; $h = $maxY - $minY + 1
+  $side = [Math]::Max($w, $h)
+  $frames = foreach ($size in 16, 20, 24, 32, 40, 48, 64, 256) {
+    $bmp = New-Object System.Drawing.Bitmap $size, $size
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $scale = $size / $side
+    $dest = New-Object System.Drawing.RectangleF (($size - $w * $scale) / 2), (($size - $h * $scale) / 2), ($w * $scale), ($h * $scale)
+    $srcRect = New-Object System.Drawing.RectangleF $minX, $minY, $w, $h
+    $g.DrawImage($src, $dest, $srcRect, [System.Drawing.GraphicsUnit]::Pixel)
+    $g.Dispose()
+    $ms = New-Object System.IO.MemoryStream
+    $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
+    , @($size, $ms.ToArray())
+  }
+  $out = New-Object System.IO.MemoryStream
+  $bw = New-Object System.IO.BinaryWriter $out
+  $bw.Write([uint16]0); $bw.Write([uint16]1); $bw.Write([uint16]$frames.Count)
+  $offset = 6 + 16 * $frames.Count
+  foreach ($f in $frames) {
+    $dim = if ($f[0] -ge 256) { 0 } else { $f[0] }
+    $bw.Write([byte]$dim); $bw.Write([byte]$dim); $bw.Write([byte]0); $bw.Write([byte]0)
+    $bw.Write([uint16]1); $bw.Write([uint16]32)
+    $bw.Write([uint32]$f[1].Length); $bw.Write([uint32]$offset)
+    $offset += $f[1].Length
+  }
+  foreach ($f in $frames) { $bw.Write([byte[]]$f[1]) }
+  $bw.Flush()
+  [IO.File]::WriteAllBytes($path, $out.ToArray())
+  $src.Dispose(); $icon.Dispose()
+}
+
 # Package logos (shown on the App extensions settings page) are made from the exe's icon.
 function Write-Logos([string]$exe, [string]$assets) {
   New-Item -ItemType Directory -Force $assets | Out-Null
-  $icon = try { [System.Drawing.Icon]::ExtractIcon($exe, 0, 256) } catch { $null }
-  if (-not $icon) { $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe) }
+  $icon = Get-ExeIcon $exe
   $src = $icon.ToBitmap()
   foreach ($logo in @{ 'StoreLogo.png' = 50; 'Square44x44Logo.png' = 44; 'Square150x150Logo.png' = 150 }.GetEnumerator()) {
     $bmp = New-Object System.Drawing.Bitmap $logo.Value, $logo.Value
@@ -76,6 +131,7 @@ foreach ($c in $commands) {
   New-Item -ItemType Directory -Force $pkg | Out-Null
   Copy-Item (Join-Path $build 'ClaudeHere.dll'), (Join-Path $build 'ClaudeHereStub.exe') $dir -Force
   Write-Logos $c.Exe (Join-Path $pkg 'Assets')
+  Write-MenuIcon $c.Exe (Join-Path $dir 'icon.ico')
 
   $manifest = $template.Replace('{{NAME}}', $c.Name).Replace('{{DISPLAY}}', $c.Display).
     Replace('{{VERB}}', $c.Verb).Replace('{{CLSID}}', $c.Clsid).Replace('{{VERSION}}', $version)

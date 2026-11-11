@@ -32,6 +32,7 @@ static const wchar_t kDesktopFamily[] = L"Claude_pzs8sxrjxfjjc";
 
 static LONG g_objects = 0;
 static LONG g_locks = 0;
+static HMODULE g_module = nullptr;
 
 enum class Kind { Terminal, Desktop };
 
@@ -379,7 +380,17 @@ public:
             : (tr ? L"Claude Masaüstünde Aç" : L"Open in Claude Desktop");
         return SHStrDupW(title, name);
     }
+    // Prefers icon.ico next to the DLL (install.ps1 writes both with the same padding, since
+    // the two exes' own icons differ in size); falls back to the exe's first icon.
     IFACEMETHODIMP GetIcon(IShellItemArray*, PWSTR* icon) override {
+        wchar_t self[MAX_PATH];
+        DWORD len = GetModuleFileNameW(g_module, self, MAX_PATH);
+        if (len > 0 && len < MAX_PATH) {
+            std::wstring ico = self;
+            ico.resize(ico.find_last_of(L'\\') + 1);
+            ico += L"icon.ico";
+            if (FileExists(ico)) return SHStrDupW(ico.c_str(), icon);
+        }
         std::wstring exe = kind_ == Kind::Terminal ? ClaudeCliPath() : DesktopExePath();
         if (exe.empty()) {
             *icon = nullptr;
@@ -496,6 +507,9 @@ STDAPI DllCanUnloadNow() {
 }
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
-    if (reason == DLL_PROCESS_ATTACH) DisableThreadLibraryCalls(module);
+    if (reason == DLL_PROCESS_ATTACH) {
+        g_module = module;
+        DisableThreadLibraryCalls(module);
+    }
     return TRUE;
 }
