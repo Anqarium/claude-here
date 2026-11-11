@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- install.ps1 bu şablondan her komut için ayrı bir sparse paket manifesti üretir.
-     {{NAME}}, {{DISPLAY}}, {{VERB}}, {{CLSID}} yer tutucularını doldurur. -->
+<!-- install.ps1 generates one sparse package manifest per command from this template,
+     filling in {{NAME}}, {{DISPLAY}}, {{VERB}}, {{CLSID}} and {{VERSION}}. -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"

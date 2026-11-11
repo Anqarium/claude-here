@@ -1,36 +1,46 @@
 # CLAUDE.md
 
-Windows 11 sağ tık menüsüne "Claude Code'da Aç" ve "Claude Masaüstünde Aç" ekleyen
-`IExplorerCommand` shell uzantısı. Ayrıntılar `README.md`'de.
+Windows 11 context menu shell extension (`IExplorerCommand`) adding "Open in Claude Code"
+and "Open in Claude Desktop". Behaviour and install steps are in `README.md`.
 
-## Komutlar
+## Language
+
+The repository is public: code, comments, docs and commit messages (Conventional Commits)
+are in English. This overrides the user's global preference for Turkish docs and commits.
+Exception: the Turkish menu titles in `src/ClaudeHere.cpp` and package names in
+`install.ps1`. The first commits are in Turkish; history is not rewritten. Replies to the
+user in chat stay in Turkish.
+
+## Commands
 
 ```powershell
-.\build.ps1      # MSVC (vcvars64) ile build\ altına derler
-.\install.ps1    # %LOCALAPPDATA%\ClaudeHere'ye kopyalar, iki sparse paketi kaydeder
-.\uninstall.ps1  # paketleri ve kurulum klasörünü kaldırır
+.\build.ps1      # MSVC via vcvars64, outputs to build\
+.\install.ps1    # copies to %LOCALAPPDATA%\ClaudeHere, registers both sparse packages
+.\uninstall.ps1  # removes the packages and the install folder
 ```
 
-## Notlar
+There are no automated tests. The COM side was checked with a throwaway probe that calls
+`CoCreateInstance` + `GetTitle`/`GetIcon`/`GetState`/`Invoke` on both CLSIDs; the menu itself
+can only be checked by hand.
 
-- Paketler imzasız, `Add-AppxPackage -Register -ExternalLocation` ile kaydedilir; Developer
-  Mode gerekir. Kapalıysa makeappx + self-signed sertifika (TrustedPeople, yönetici) gerekir.
-- Repodan değil `%LOCALAPPDATA%\ClaudeHere`'den kaydedilir: repo OneDrive altında ve yüklü DLL
-  kilitlenir. `install.ps1` önce DLL'i tutan `dllhost` süreçlerini kapatır.
-- Komutlar bilerek iki ayrı pakettir (`ClaudeHere.Terminal`, `ClaudeHere.Desktop`): Windows
-  bir paketteki birden çok verb'ü alt menüde toplayabilir, terminal girdisi üst düzeyde kalmalı.
-- CLSID'ler `src/ClaudeHere.cpp` ve `install.ps1`'de; ikisi birlikte değişmeli.
-- Masaüstü derin bağlantısı `claude://code/new?folder=<encodeURIComponent>`, Claude masaüstü
-  uygulamasının kendi `ccd` takma adının ürettiği biçim (app.asar'dan okundu).
-- Dil: menü başlığı `GetUserDefaultUILanguage` (Windows arayüz dili, Explorer'ın kullandığı) ile
-  seçilir, paket adı kurulumda `Get-UICulture` ile. Windows Terminal ise dil tercih listesini
-  izler; bu makinede arayüz `en-US`, liste `tr` önde olduğu için "Terminalde Aç" Türkçe görünür.
-- Terminal girdisi her tıklamada Windows Terminal `settings.json`'ını (JSONC; yorum ve sondaki
-  virgüller atılıp `Windows.Data.Json` ile) okur, `defaultProfile`'ı `-p` ile verir ve claude'u
-  profilin kabuğunda çalıştırır. Profil zaten `-Command`/`/c` gibi bir komut taşıyorsa üstüne
-  eklenmez, claude doğrudan açılır.
-- Masaüstü `folder` bağlantısı (`src=external`) her seferinde onay ister; uygulamanın güvenlik
-  kararı, aşılmaz. Masaüstünün güven listesi (`localAgentModeTrustedFolders`) CLI'nin
-  `~/.claude.json` listesinden ayrı.
-- Menünün kendisi otomatik test edilemiyor; COM tarafı `CoCreateInstance` + `GetTitle`/`GetState`/
-  `Invoke` çağıran küçük bir probe ile doğrulandı (2026-11-12).
+## Notes
+
+- Packages are unsigned and registered with `Add-AppxPackage -Register -ExternalLocation`,
+  which needs Developer Mode. Without it, signing would need makeappx + a certificate
+  trusted in TrustedPeople (admin).
+- Register from `%LOCALAPPDATA%\ClaudeHere`, never from the repo: the loaded DLL gets locked.
+  `install.ps1` first stops the `dllhost` processes holding it.
+- The two commands are deliberately separate packages (`ClaudeHere.Terminal`,
+  `ClaudeHere.Desktop`): Windows may group several verbs of one package into a submenu.
+- The CLSIDs live in both `src/ClaudeHere.cpp` and `install.ps1`; change them together.
+- Language: the menu title uses `GetUserDefaultUILanguage` (the display language Explorer
+  uses); the package name uses `Get-UICulture` at install time. Windows Terminal follows the
+  preferred-languages list instead, so its own entry can be in a different language.
+- Terminal entry: reads Windows Terminal's `settings.json` on every click (JSONC: comments
+  and trailing commas are stripped, then `Windows.Data.Json`), passes `defaultProfile` with
+  `-p` and runs claude inside the profile's shell. If the profile already carries a command
+  (`-Command`, `/c`, …), claude runs directly instead.
+- Desktop entry: `claude://code/new?folder=<encodeURIComponent>` is the format the desktop
+  app's own `ccd` alias produces (read from its app.asar). The app adds `src=external` and
+  always asks for confirmation; this cannot be bypassed. Its "Trust this workspace?" answer
+  is stored in the CLI's `~/.claude.json` (`projects[path].hasTrustDialogAccepted`).

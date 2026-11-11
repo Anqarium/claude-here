@@ -1,5 +1,5 @@
-// Sparse paket manifesti bir <Application> ve onun exe'sini ister; menü komutları
-// bu exe'yi kullanmaz. Başlatılırsa hiçbir şey yapmadan çıkar.
+// A sparse package manifest needs an <Application> with an exe; the menu commands
+// don't use it. If started, it exits without doing anything.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 

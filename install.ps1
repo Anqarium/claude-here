@@ -1,6 +1,6 @@
-# Derlenen DLL'i %LOCALAPPDATA%\ClaudeHere altına kopyalar ve her menü komutunu
-# ayrı bir sparse paket olarak kaydeder. Developer Mode açık olmalı (imzasız kayıt).
-# Tekrar çalıştırmak güncellemedir: eski paketler kaldırılıp yeniden kaydedilir.
+# Copies the built DLL to %LOCALAPPDATA%\ClaudeHere and registers each menu command as
+# its own sparse package. Developer Mode must be on (the packages are unsigned).
+# Running it again updates: the old packages are removed and registered again.
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $build = Join-Path $root 'build'
@@ -25,7 +25,7 @@ function Find-ClaudeCli {
   return $null
 }
 
-# Paket logoları (App extensions sayfasında görünür) exe'nin ikonundan üretilir.
+# Package logos (shown on the App extensions settings page) are made from the exe's icon.
 function Write-Logos([string]$exe, [string]$assets) {
   New-Item -ItemType Directory -Force $assets | Out-Null
   $icon = try { [System.Drawing.Icon]::ExtractIcon($exe, 0, 256) } catch { $null }
@@ -43,8 +43,8 @@ function Write-Logos([string]$exe, [string]$assets) {
   $src.Dispose(); $icon.Dispose()
 }
 
-# Paket adları (App extensions sayfası) kurulum anındaki Windows arayüz diline göre;
-# menü yazılarını ise DLL her açılışta kendisi seçer.
+# Package names (App extensions page) follow the Windows display language at install time;
+# the DLL picks the menu titles itself every time the menu opens.
 $tr = (Get-UICulture).TwoLetterISOLanguageName -eq 'tr'
 $commands = @(
   @{ Name = 'ClaudeHere.Terminal'; Folder = 'Terminal'; Verb = 'ClaudeCode'
@@ -55,7 +55,7 @@ $commands = @(
      Clsid = '59847620-2a77-4b45-ad83-ef512e443b3b'; Exe = Find-DesktopExe }
 )
 
-# DLL'i tutan surrogate (dllhost) süreçlerini kapat; yoksa kopyalama kilitli dosyaya çarpar.
+# Stop the surrogate (dllhost) processes holding the DLL, or the copy hits a locked file.
 Get-Process dllhost -ErrorAction SilentlyContinue | Where-Object {
   try { $_.Modules.FileName -like "$base\*" } catch { $false }
 } | Stop-Process -Force
@@ -67,7 +67,7 @@ foreach ($c in $commands) {
   if ($old) { Remove-AppxPackage -Package $old.PackageFullName }
 
   if (-not $c.Exe) {
-    Write-Warning "$($c.Display): hedef uygulama bulunamadı, atlanıyor."
+    Write-Warning "$($c.Display): target app not found, skipping."
     continue
   }
 
@@ -83,5 +83,5 @@ foreach ($c in $commands) {
   [IO.File]::WriteAllText($manifestPath, $manifest, (New-Object System.Text.UTF8Encoding $false))
 
   Add-AppxPackage -Register $manifestPath -ExternalLocation $dir
-  Write-Host "Kaydedildi: $($c.Name)"
+  Write-Host "Registered: $($c.Name)"
 }

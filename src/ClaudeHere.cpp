@@ -1,7 +1,7 @@
-// Windows 11 sağ tık menüsüne iki komut ekleyen IExplorerCommand sunucusu:
-//   - Terminal: Windows Terminal'de, seçilen klasörde `claude` (Claude Code CLI) açar.
-//   - Masaüstü: Claude masaüstü uygulamasında o klasörle yeni bir Claude Code oturumu açar.
-// Her komut ayrı bir sparse paketle kaydedilir (package/*.xml), DLL dllhost.exe içinde çalışır.
+// IExplorerCommand server that adds two commands to the Windows 11 context menu:
+//   - Terminal: opens `claude` (Claude Code CLI) in Windows Terminal, in the clicked folder.
+//   - Desktop: starts a new Claude Code session on that folder in the Claude desktop app.
+// Each command is registered by its own sparse package (package/*.xml); the DLL runs in dllhost.exe.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -27,7 +27,7 @@ static const CLSID CLSID_ClaudeTerminal = {0x0f55b8ab, 0x4947, 0x4eab, {0xb1, 0x
 // {59847620-2A77-4B45-AD83-EF512E443B3B}
 static const CLSID CLSID_ClaudeDesktop = {0x59847620, 0x2a77, 0x4b45, {0xad, 0x83, 0xef, 0x51, 0x2e, 0x44, 0x3b, 0x3b}};
 
-// Claude masaüstü uygulamasının paket ailesi (yayıncı karması sabittir, sürümle değişmez).
+// Package family of the Claude desktop app (the publisher hash is fixed across versions).
 static const wchar_t kDesktopFamily[] = L"Claude_pzs8sxrjxfjjc";
 
 static LONG g_objects = 0;
@@ -47,7 +47,7 @@ static bool FileExists(const std::wstring& p) {
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-// Claude Code CLI: önce yerel kurulumun varsayılan yeri, sonra PATH.
+// Claude Code CLI: the native installer's default location first, then PATH.
 static std::wstring ClaudeCliPath() {
     std::wstring p = EnvPath(L"USERPROFILE", L"\\.local\\bin\\claude.exe");
     if (!p.empty() && FileExists(p)) return p;
@@ -57,7 +57,7 @@ static std::wstring ClaudeCliPath() {
     return L"";
 }
 
-// Claude masaüstü uygulamasının exe yolu; kurulu değilse boş.
+// Path of the Claude desktop app's exe; empty when it is not installed.
 static std::wstring DesktopExePath() {
     UINT32 count = 0, bufLen = 0;
     LONG rc = FindPackagesByPackageFamily(kDesktopFamily, PACKAGE_FILTER_HEAD, &count, nullptr, &bufLen, nullptr, nullptr);
@@ -84,8 +84,8 @@ static HRESULT PathOfItem(IShellItem* item, std::wstring& out) {
     return hr;
 }
 
-// Seçilen klasör; klasör arka planına tıklanınca dizi boş gelebilir, o zaman
-// pencerenin kendi klasörü site → IFolderView üzerinden alınır.
+// The clicked folder. On a folder background the item array may be empty; then the
+// window's own folder is taken from the site via IFolderView.
 static HRESULT TargetFolder(IShellItemArray* items, IUnknown* site, std::wstring& out) {
     if (items) {
         DWORD count = 0;
@@ -116,7 +116,7 @@ static HRESULT TargetFolder(IShellItemArray* items, IUnknown* site, std::wstring
     return hr;
 }
 
-// encodeURIComponent eşdeğeri (UTF-8).
+// Equivalent of encodeURIComponent (UTF-8).
 static std::wstring UriEncode(const std::wstring& s) {
     int n = WideCharToMultiByte(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0, nullptr, nullptr);
     std::string u(n, '\0');
@@ -135,12 +135,12 @@ static std::wstring UriEncode(const std::wstring& s) {
     return out;
 }
 
-// --- Windows Terminal'in varsayılan profili ---------------------------------
+// --- Windows Terminal's default profile --------------------------------------
 
 struct Profile {
-    std::wstring id;           // settings.json'daki defaultProfile değeri (GUID ya da ad)
-    std::wstring commandline;  // profilin commandline'ı; dinamik profillerde boş
-    std::wstring source;       // dinamik profil kaynağı (ör. Windows.Terminal.PowershellCore)
+    std::wstring id;           // defaultProfile value from settings.json (GUID or name)
+    std::wstring commandline;  // the profile's commandline; empty for dynamic profiles
+    std::wstring source;       // dynamic profile source (e.g. Windows.Terminal.PowershellCore)
 };
 
 static bool ReadUtf8File(const std::wstring& path, std::wstring& out) {
@@ -163,7 +163,7 @@ static bool ReadUtf8File(const std::wstring& path, std::wstring& out) {
     return true;
 }
 
-// settings.json JSONC'dir: yorumları ve sondaki virgülleri at ki JsonObject::Parse kabul etsin.
+// settings.json is JSONC: drop comments and trailing commas so JsonObject::Parse accepts it.
 static std::wstring StripJsonc(const std::wstring& s) {
     std::wstring o;
     o.reserve(s.size());
@@ -231,7 +231,7 @@ static bool DefaultProfile(Profile& p) {
                 return true;
             }
         } catch (...) {
-            // Bozuk ya da beklenmedik ayar dosyası: varsayılan davranışa düş.
+            // Broken or unexpected settings file: fall back to the default behaviour.
         }
         return false;
     }
@@ -243,7 +243,7 @@ static std::wstring Lower(std::wstring s) {
     return s;
 }
 
-// Boşlukla ayrılmış (küçük harfli) komut satırında bu belirteçlerden biri var mı?
+// Does the space-separated (lowercased) command line contain one of these tokens?
 static bool HasToken(const std::wstring& lower, std::initializer_list<const wchar_t*> tokens) {
     size_t i = 0;
     while (i < lower.size()) {
@@ -257,7 +257,7 @@ static bool HasToken(const std::wstring& lower, std::initializer_list<const wcha
     return false;
 }
 
-// Profilin kabuğunda claude'u başlatan komut satırı; bilinmeyen kabukta boş.
+// Command line that starts claude inside the profile's shell; empty for an unknown shell.
 static std::wstring ShellWithClaude(const Profile& p, const std::wstring& claude) {
     std::wstring cmd = p.commandline;
     if (cmd.empty() && p.source == L"Windows.Terminal.PowershellCore") {
@@ -271,7 +271,7 @@ static std::wstring ShellWithClaude(const Profile& p, const std::wstring& claude
     if (n == 0 || n > ARRAYSIZE(expanded)) return L"";
     cmd = expanded;
 
-    // İlk belirteç: kabuğun exe'si.
+    // First token: the shell's exe.
     std::wstring exe;
     if (cmd[0] == L'"') {
         size_t end = cmd.find(L'"', 1);
@@ -285,7 +285,7 @@ static std::wstring ShellWithClaude(const Profile& p, const std::wstring& claude
     if (base == L"pwsh.exe" || base == L"pwsh" || base == L"powershell.exe" || base == L"powershell") {
         if (HasToken(lower, {L"-c", L"-command", L"-cwa", L"-commandwithargs", L"-f", L"-file", L"-e", L"-ec",
                              L"-encodedcommand"}))
-            return L"";  // profil zaten bir komut/dosya çalıştırıyor; üstüne ekleme
+            return L"";  // the profile already runs a command/file; don't add to it
         std::wstring quoted;
         for (wchar_t c : claude) {
             if (c == L'\'') quoted += L'\'';
@@ -300,7 +300,7 @@ static std::wstring ShellWithClaude(const Profile& p, const std::wstring& claude
     return L"";
 }
 
-// wt komut satırında ';' yeni sekme/komut ayırıcıdır; düz ';' için '\;' gerekir.
+// In a wt command line ';' separates tabs/commands; a literal ';' needs '\;'.
 static std::wstring EscapeWt(const std::wstring& s) {
     std::wstring o;
     for (wchar_t c : s) {
@@ -316,12 +316,12 @@ static HRESULT LaunchTerminal(const std::wstring& folder) {
 
     std::wstring wt = EnvPath(L"LOCALAPPDATA", L"\\Microsoft\\WindowsApps\\wt.exe");
     if (!wt.empty() && FileExists(wt)) {
-        // Sondaki ters bölü kapanış tırnağını kaçırır ("C:\" → "C:\.").
+        // A trailing backslash would escape the closing quote ("C:\" -> "C:\.").
         std::wstring dir = folder;
         if (!dir.empty() && dir.back() == L'\\') dir += L'.';
 
-        // Varsayılan profille aç (simge, renk, başlık ondan gelir); claude'u profilin
-        // kabuğunda çalıştır ki kabuk profili yüklensin ve claude bitince kabukta kalınsın.
+        // Open with the default profile (icon, colours and title come from it) and run claude
+        // inside its shell, so the shell profile loads and the shell stays when claude exits.
         Profile profile;
         std::wstring args;
         std::wstring inner;
@@ -334,7 +334,7 @@ static HRESULT LaunchTerminal(const std::wstring& folder) {
         HINSTANCE h = ShellExecuteW(nullptr, L"open", wt.c_str(), args.c_str(), folder.c_str(), SW_SHOWNORMAL);
         if ((INT_PTR)h > 32) return S_OK;
     }
-    // Windows Terminal yoksa: varsayılan konsolda doğrudan claude.
+    // No Windows Terminal: run claude directly in the default console.
     HINSTANCE h = ShellExecuteW(nullptr, L"open", claude.c_str(), nullptr, folder.c_str(), SW_SHOWNORMAL);
     return (INT_PTR)h > 32 ? S_OK : HRESULT_FROM_WIN32(GetLastError());
 }
@@ -371,7 +371,7 @@ public:
     }
 
     // IExplorerCommand
-    // Başlık Windows arayüz diline göre: Türkçe, değilse İngilizce.
+    // Title follows the Windows display language: Turkish, otherwise English.
     IFACEMETHODIMP GetTitle(IShellItemArray*, PWSTR* name) override {
         bool tr = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_TURKISH;
         const wchar_t* title = kind_ == Kind::Terminal

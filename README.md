@@ -1,48 +1,75 @@
 # claude-here
 
-Windows 11'in yeni (kısa) sağ tık menüsüne iki girdi ekler:
+Adds two entries to the **new Windows 11 context menu** (the short one, not only
+"Show more options"):
 
-- **Claude Code'da Aç** — Windows Terminal'de, tıklanan klasörde `claude` (Claude Code CLI) açar.
-  Terminal'in **varsayılan profili** kullanılır (simge, renk, başlık ondan gelir) ve `claude`
-  o profilin kabuğunda başlar: PowerShell'de `-NoExit -Command`, cmd'de `/k`. Böylece kabuk
-  profili yüklenir ve `claude` bitince kabukta kalınır. Tanınmayan kabuklarda (WSL, Git Bash…)
-  `claude` profilin görünümüyle doğrudan açılır. Windows Terminal yoksa varsayılan konsolda açılır.
-- **Claude Masaüstünde Aç** — Claude masaüstü uygulamasında o klasörle yeni bir Claude Code
-  oturumu açar (`claude://code/new?folder=...`). Uygulama kurulu değilse girdi gizlenir.
+- **Open in Claude Code**: opens `claude` (the Claude Code CLI) in Windows Terminal, in the
+  folder you clicked.
+- **Open in Claude Desktop**: starts a new Claude Code session on that folder in the Claude
+  desktop app.
 
-Her ikisi de klasöre sağ tıklayınca ve klasörün içinde boşluğa sağ tıklayınca çıkar.
+Both show up when you right-click a folder and when you right-click empty space inside one.
+The titles follow the Windows display language: Turkish on a Turkish UI, English otherwise.
 
-Yazılar Windows arayüz diline göre: Türkçe arayüzde yukarıdaki gibi, diğer dillerde
-İngilizce (**Open in Claude Code**, **Open in Claude Desktop**).
+> Unofficial. Not affiliated with or endorsed by Anthropic.
 
-Masaüstü girdisi her tıklamada bir onay sorar: Claude masaüstü uygulaması başka bir
-uygulamadan gelen klasörü güvenlik gereği her zaman onaya sunar.
+## How it behaves
 
-## Nasıl çalışır
+**Open in Claude Code** uses Windows Terminal's **default profile**, so the tab gets that
+profile's icon, colours and title, and `claude` starts *inside* the profile's shell:
 
-`IExplorerCommand` uygulayan küçük bir C++ COM DLL'i (`src/ClaudeHere.cpp`), her komut için
-ayrı bir *sparse* paketle kaydedilir (`package/AppxManifest.template.xml`). Windows Terminal'in
-"Terminalde aç" girdisi de aynı yapıyı kullanır. DLL Explorer'ın içinde değil, `dllhost.exe`
-surrogate sürecinde çalışır. İki ayrı paket olduğu için Windows ikisini tek bir alt menüde
-toplamaz ve **Ayarlar → Kişiselleştirme → … → App extensions** sayfasında her biri ayrı
-açılıp kapatılabilir.
+| Default profile | What runs |
+| --- | --- |
+| PowerShell 7 / Windows PowerShell | `pwsh -NoExit -Command "& 'claude.exe'"` |
+| Command Prompt | `cmd /k "claude.exe"` |
+| anything else (WSL, Git Bash, …) | `claude.exe` directly, with the profile's look |
 
-## Gereksinimler
+Your shell profile loads, and when `claude` exits you are left in the shell in that folder.
+The default profile is read on every click, so changing it in Windows Terminal takes effect
+at once. Without Windows Terminal, `claude` opens in the default console.
 
-- Windows 11, **Developer Mode açık** (paket imzasız kaydedilir).
-- Visual Studio 2022 C++ araçları ve Windows 11 SDK
+**Open in Claude Desktop** opens `claude://code/new?folder=<path>`. The desktop app asks for
+confirmation every time a folder comes from another app; that is the app's own safety
+check, and there is no setting to turn it off. The entry is hidden when the desktop app is
+not installed, and the terminal entry is hidden when `claude` is not found.
+
+## How it works
+
+A small C++ COM DLL (`src/ClaudeHere.cpp`) implements `IExplorerCommand`. Each command is
+registered by its own **sparse package** (`package/AppxManifest.template.xml`). This is the
+same mechanism Windows Terminal uses for "Open in Terminal". The DLL runs in a `dllhost.exe`
+surrogate, not inside Explorer.
+
+The two commands are separate packages so Windows does not fold them into one submenu, and
+each can be moved in or out of the main menu on its own under **Settings → Personalization
+→ Context menu → App extensions** (on builds that have that page).
+
+## Requirements
+
+- Windows 11 with **Developer Mode on**, because the packages are registered unsigned.
+- Visual Studio 2022 with the C++ tools, and the Windows 11 SDK
   (`winget install Microsoft.WindowsSDK.10.0.26100`).
-- Claude Code CLI (`%USERPROFILE%\.local\bin\claude.exe` veya PATH'te).
+- Claude Code CLI (`%USERPROFILE%\.local\bin\claude.exe` or on `PATH`), and optionally the
+  Claude desktop app.
 
-## Kurulum
+## Install
+
+Run from PowerShell 7 in the repo folder:
 
 ```powershell
-.\build.ps1      # build\ClaudeHere.dll ve build\ClaudeHereStub.exe
-.\install.ps1    # %LOCALAPPDATA%\ClaudeHere altına kopyalar ve paketleri kaydeder
+.\build.ps1      # builds build\ClaudeHere.dll and build\ClaudeHereStub.exe
+.\install.ps1    # copies them to %LOCALAPPDATA%\ClaudeHere and registers the packages
 ```
 
-Güncellemek için ikisini yeniden çalıştırmak yeterli. Kaldırmak için:
+Run both again to update. To remove everything:
 
 ```powershell
 .\uninstall.ps1
 ```
+
+If an entry does not appear right away, check the **App extensions** settings page, or sign
+out and back in.
+
+## License
+
+[MIT](LICENSE)
