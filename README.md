@@ -3,7 +3,10 @@
 Windows 11'in yeni (kısa) sağ tık menüsüne iki girdi ekler:
 
 - **Claude Code'da Aç** — Windows Terminal'de, tıklanan klasörde `claude` (Claude Code CLI) açar.
-  Windows Terminal yoksa `claude.exe` varsayılan konsolda açılır.
+  Terminal'in **varsayılan profili** kullanılır (simge, renk, başlık ondan gelir) ve `claude`
+  o profilin kabuğunda başlar: PowerShell'de `-NoExit -Command`, cmd'de `/k`. Böylece kabuk
+  profili yüklenir ve `claude` bitince kabukta kalınır. Tanınmayan kabuklarda (WSL, Git Bash…)
+  `claude` profilin görünümüyle doğrudan açılır. Windows Terminal yoksa varsayılan konsolda açılır.
 - **Claude Masaüstünde Aç** — Claude masaüstü uygulamasında o klasörle yeni bir Claude Code
   oturumu açar (`claude://code/new?folder=...`). Uygulama kurulu değilse girdi gizlenir.
 

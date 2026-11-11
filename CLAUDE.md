@@ -25,6 +25,10 @@ Windows 11 sağ tık menüsüne "Claude Code'da Aç" ve "Claude Masaüstünde A�
 - Dil: menü başlığı `GetUserDefaultUILanguage` (Windows arayüz dili, Explorer'ın kullandığı) ile
   seçilir, paket adı kurulumda `Get-UICulture` ile. Windows Terminal ise dil tercih listesini
   izler; bu makinede arayüz `en-US`, liste `tr` önde olduğu için "Terminalde Aç" Türkçe görünür.
+- Terminal girdisi her tıklamada Windows Terminal `settings.json`'ını (JSONC; yorum ve sondaki
+  virgüller atılıp `Windows.Data.Json` ile) okur, `defaultProfile`'ı `-p` ile verir ve claude'u
+  profilin kabuğunda çalıştırır. Profil zaten `-Command`/`/c` gibi bir komut taşıyorsa üstüne
+  eklenmez, claude doğrudan açılır.
 - Masaüstü `folder` bağlantısı (`src=external`) her seferinde onay ister; uygulamanın güvenlik
   kararı, aşılmaz. Masaüstünün güven listesi (`localAgentModeTrustedFolders`) CLI'nin
   `~/.claude.json` listesinden ayrı.
