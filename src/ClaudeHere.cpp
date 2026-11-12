@@ -182,11 +182,30 @@ static void AppendUtf8(std::string& out, unsigned cp) {
     } else if (cp < 0x800) {
         out += (char)(0xC0 | (cp >> 6));
         out += (char)(0x80 | (cp & 0x3F));
-    } else {
+    } else if (cp < 0x10000) {
         out += (char)(0xE0 | (cp >> 12));
         out += (char)(0x80 | ((cp >> 6) & 0x3F));
         out += (char)(0x80 | (cp & 0x3F));
+    } else {
+        out += (char)(0xF0 | (cp >> 18));
+        out += (char)(0x80 | ((cp >> 12) & 0x3F));
+        out += (char)(0x80 | ((cp >> 6) & 0x3F));
+        out += (char)(0x80 | (cp & 0x3F));
     }
+}
+
+// The four hex digits at text[i..i+3] as a code unit, or -1 when they are missing or invalid.
+static int Hex4(const std::string& text, size_t i) {
+    if (i + 4 > text.size()) return -1;
+    int cp = 0;
+    for (size_t k = 0; k < 4; k++) {
+        char h = text[i + k];
+        int v = (h >= '0' && h <= '9') ? h - '0' : (h >= 'a' && h <= 'f') ? h - 'a' + 10
+              : (h >= 'A' && h <= 'F') ? h - 'A' + 10 : -1;
+        if (v < 0) return -1;
+        cp = cp * 16 + v;
+    }
+    return cp;
 }
 
 // Value of the JSON string that starts right after `marker` (e.g. "\"cwd\":\""), unescaped.
@@ -201,21 +220,34 @@ static std::string JsonString(const std::string& text, const char* marker, bool 
             continue;
         }
         char e = text[++i];
-        if (e == 'u' && i + 4 < text.size()) {
-            unsigned cp = 0;
-            for (size_t k = 1; k <= 4; k++) {
-                char h = text[i + k];
-                int v = (h >= '0' && h <= '9') ? h - '0' : (h >= 'a' && h <= 'f') ? h - 'a' + 10
-                      : (h >= 'A' && h <= 'F') ? h - 'A' + 10 : -1;
-                if (v < 0) { cp = 0xFFFD; break; }
-                cp = cp * 16 + v;
+        if (e == 'u') {
+            int cp = Hex4(text, i + 1);
+            if (cp < 0) {
+                out += '\xEF'; out += '\xBF'; out += '\xBD';  // U+FFFD
+                continue;
             }
-            AppendUtf8(out, cp);
             i += 4;
+            // Characters outside the BMP (emoji) come as a \uD8xx\uDCxx surrogate pair.
+            if (cp >= 0xD800 && cp <= 0xDBFF && i + 2 < text.size() && text[i + 1] == '\\' &&
+                text[i + 2] == 'u') {
+                int lo = Hex4(text, i + 3);
+                if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                    i += 6;
+                }
+            }
+            if (cp >= 0xD800 && cp <= 0xDFFF) cp = 0xFFFD;  // lone surrogate
+            AppendUtf8(out, (unsigned)cp);
         } else if (e == 'n') {
             out += '\n';
         } else if (e == 't') {
             out += '\t';
+        } else if (e == 'r') {
+            out += '\r';
+        } else if (e == 'b') {
+            out += '\b';
+        } else if (e == 'f') {
+            out += '\f';
         } else {
             out += e;  // \" \\ \/
         }
@@ -299,10 +331,17 @@ static std::vector<Session> ScanSessions(const std::wstring& folder) {
         // Sessions started by Claude itself (coordinator relays, scheduled tasks) mark their first
         // prompt with promptSource "system"; typed ones say "typed", "sdk" or nothing.
         if (JsonString(head, "\"promptSource\":\"") == "system") continue;
-        std::wstring title = Utf8ToWide(JsonString(ReadChunk(path, true), "\"aiTitle\":\"", true));
-        if (title.empty()) title = Utf8ToWide(JsonString(head, "\"aiTitle\":\"", true));
+        // Like Claude Code's own /resume list, a name given with /rename or `claude -n`
+        // (customTitle) wins over the generated aiTitle. Both are re-appended, the newest counts.
+        std::string tail = ReadChunk(path, true);
+        std::string title8 = JsonString(tail, "\"customTitle\":\"", true);
+        if (title8.empty()) title8 = JsonString(head, "\"customTitle\":\"", true);
+        if (title8.empty()) title8 = JsonString(tail, "\"aiTitle\":\"", true);
+        if (title8.empty()) title8 = JsonString(head, "\"aiTitle\":\"", true);
+        std::wstring title = Utf8ToWide(title8);
         std::wstring label = FormatTime(c.mtime);
-        if (!title.empty()) label = title.substr(0, 60) + L" - " + label;
+        if (title.size() > 60) title.resize(IS_HIGH_SURROGATE(title[59]) ? 59 : 60);  // keep pairs whole
+        if (!title.empty()) label = title + L" - " + label;
         out.push_back({c.id, label});
     }
     return out;
