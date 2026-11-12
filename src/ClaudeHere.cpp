@@ -191,8 +191,8 @@ static void AppendUtf8(std::string& out, unsigned cp) {
 
 // Value of the JSON string that starts right after `marker` (e.g. "\"cwd\":\""), unescaped.
 // Returns empty when the marker is absent. Never throws.
-static std::string JsonString(const std::string& text, const char* marker) {
-    size_t i = text.find(marker);
+static std::string JsonString(const std::string& text, const char* marker, bool last = false) {
+    size_t i = last ? text.rfind(marker) : text.find(marker);
     if (i == std::string::npos) return {};
     std::string out;
     for (i += strlen(marker); i < text.size() && text[i] != '"'; i++) {
@@ -223,13 +223,20 @@ static std::string JsonString(const std::string& text, const char* marker) {
     return out;
 }
 
-// The start of a transcript. The cwd and the AI title are in the first lines; some lines are
-// huge hook attachments, so the read is capped.
-static std::string ReadHead(const std::wstring& path) {
+// The first or last 512 KB of a transcript. The cwd is in the first lines; the AI title is
+// rewritten during the session, so its newest value is near the end. Some lines are huge hook
+// attachments, so the read is capped.
+static std::string ReadChunk(const std::wstring& path, bool tail) {
     constexpr DWORD kBytes = 512 * 1024;
     HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            nullptr, OPEN_EXISTING, 0, nullptr);
     if (f == INVALID_HANDLE_VALUE) return {};
+    LARGE_INTEGER size{};
+    if (tail && GetFileSizeEx(f, &size) && size.QuadPart > kBytes) {
+        LARGE_INTEGER pos{};
+        pos.QuadPart = size.QuadPart - kBytes;
+        SetFilePointerEx(f, pos, nullptr, FILE_BEGIN);
+    }
     std::string buf(kBytes, '\0');
     DWORD read = 0;
     if (!ReadFile(f, buf.data(), kBytes, &read, nullptr)) read = 0;
@@ -286,9 +293,14 @@ static std::vector<Session> ScanSessions(const std::wstring& folder) {
     });
     for (const Candidate& c : files) {
         if (out.size() >= kMaxSessions) break;
-        std::string head = ReadHead(base + c.id + L".jsonl");
+        std::wstring path = base + c.id + L".jsonl";
+        std::string head = ReadChunk(path, false);
         if (!SameFolder(Utf8ToWide(JsonString(head, "\"cwd\":\"")), folder)) continue;
-        std::wstring title = Utf8ToWide(JsonString(head, "\"aiTitle\":\""));
+        // Sessions started by Claude itself (coordinator relays, scheduled tasks) mark their first
+        // prompt with promptSource "system"; typed ones say "typed", "sdk" or nothing.
+        if (JsonString(head, "\"promptSource\":\"") == "system") continue;
+        std::wstring title = Utf8ToWide(JsonString(ReadChunk(path, true), "\"aiTitle\":\"", true));
+        if (title.empty()) title = Utf8ToWide(JsonString(head, "\"aiTitle\":\"", true));
         std::wstring label = FormatTime(c.mtime);
         if (!title.empty()) label = title.substr(0, 60) + L" - " + label;
         out.push_back({c.id, label});

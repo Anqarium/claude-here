@@ -50,7 +50,10 @@ can only be checked by hand.
   is stored in the CLI's `~/.claude.json` (`projects[path].hasTrustDialogAccepted`).
 - Recent sessions submenu: transcripts are `%USERPROFILE%\.claude\projects\<dir>\<uuid>.jsonl`,
   where `<dir>` is the folder path with every non-alphanumeric character replaced by `-` (checked
-  on ASCII paths only). `cwd` and `aiTitle` are read from the first 512 KB. The submenu needs
+  on ASCII paths only). `cwd` comes from the first 512 KB; `aiTitle` is rewritten during a session,
+  so the newest one is taken from the last 512 KB. Sessions whose first prompt has
+  `promptSource: "system"` (coordinator relays, scheduled tasks) are hidden: across 110 local
+  transcripts only those had it; typed ones carry `typed`, `queued`, `sdk` or nothing. The submenu needs
   `GetState` to see the clicked folder first, because `GetFlags` and `EnumSubCommands` get no items.
   `ECF_HASSPLITBUTTON` was tried and dropped: the new menu shows the arrow but never invokes the
   root, so "New session" stays inside the submenu.

@@ -42,7 +42,8 @@ labelled with the session's title and time). Both entries list the same sessions
 - Terminal: runs `claude --resume <id>` in the folder.
 - Desktop: opens `claude://resume?session=<id>`.
 
-The sessions are read from `%USERPROFILE%\.claude\projects\`. Without sessions in the folder,
+The sessions are read from `%USERPROFILE%\.claude\projects\`. Sessions that Claude started on
+its own (scheduled tasks, sessions spawned by another session) are left out. Without sessions in the folder,
 the entries behave as before: one click starts a new session.
 
 ## How it works
