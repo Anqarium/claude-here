@@ -619,7 +619,7 @@ public:
         bool tr = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_TURKISH;
         switch (role_) {
         case Role::Separator:
-            return E_NOTIMPL;
+            return SHStrDupW(L"", name);
         case Role::New:
             return SHStrDupW(tr ? L"Yeni oturum" : L"New session", name);
         case Role::Resume:
@@ -635,6 +635,10 @@ public:
     // Prefers icon.ico next to the DLL (install.ps1 writes both with the same padding, since
     // the two exes' own icons differ in size); falls back to the exe's first icon.
     IFACEMETHODIMP GetIcon(IShellItemArray*, PWSTR* icon) override {
+        if (role_ == Role::Separator) {
+            *icon = nullptr;
+            return E_NOTIMPL;
+        }
         wchar_t self[MAX_PATH];
         DWORD len = GetModuleFileNameW(g_module, self, MAX_PATH);
         if (len > 0 && len < MAX_PATH) {
