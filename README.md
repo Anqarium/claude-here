@@ -33,6 +33,18 @@ confirmation every time a folder comes from another app; that is the app's own s
 check, and there is no setting to turn it off. The entry is hidden when the desktop app is
 not installed, and the terminal entry is hidden when `claude` is not found.
 
+### Recent sessions
+
+When the clicked folder has Claude Code sessions, both entries open a submenu: **New session**
+first, then a separator, then the five most recent sessions of that folder (newest first,
+labelled with the session's title and time). Both entries list the same sessions.
+
+- Terminal: runs `claude --resume <id>` in the folder.
+- Desktop: opens `claude://resume?session=<id>`.
+
+The sessions are read from `%USERPROFILE%\.claude\projects\`. Without sessions in the folder,
+the entries behave as before: one click starts a new session.
+
 ## How it works
 
 A small C++ COM DLL (`src/ClaudeHere.cpp`) implements `IExplorerCommand`. Each command is

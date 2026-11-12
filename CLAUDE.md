@@ -48,3 +48,9 @@ can only be checked by hand.
   app's own `ccd` alias produces (read from its app.asar). The app adds `src=external` and
   always asks for confirmation; this cannot be bypassed. Its "Trust this workspace?" answer
   is stored in the CLI's `~/.claude.json` (`projects[path].hasTrustDialogAccepted`).
+- Recent sessions submenu: transcripts are `%USERPROFILE%\.claude\projects\<dir>\<uuid>.jsonl`,
+  where `<dir>` is the folder path with every non-alphanumeric character replaced by `-` (checked
+  on ASCII paths only). `cwd` and `aiTitle` are read from the first 512 KB. The submenu needs
+  `GetState` to see the clicked folder first, because `GetFlags` and `EnumSubCommands` get no items.
+- Desktop resume: `claude://resume?session=<uuid>` (host `resume`, read from app.asar; it imports
+  the CLI transcript). Not fired on a live app yet.

@@ -10,6 +10,10 @@
 #include <shobjidl_core.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <algorithm>
+#include <cctype>
+#include <cstring>
+#include <cwchar>
 #include <new>
 #include <string>
 #include <vector>
@@ -136,6 +140,162 @@ static std::wstring UriEncode(const std::wstring& s) {
     return out;
 }
 
+// --- Recent Claude Code sessions of a folder --------------------------------
+
+// Claude Code keeps the transcripts of a project in %USERPROFILE%\.claude\projects\<name>\, where
+// <name> is the project path with every non-alphanumeric character replaced by '-'.
+constexpr size_t kMaxSessions = 5;
+
+struct Session {
+    std::wstring id;     // session UUID: the .jsonl file name without its extension
+    std::wstring label;  // "<AI title> - dd.MM HH:mm" (or only the time when there is no title)
+};
+
+static bool IsUuid(const std::wstring& s) {
+    if (s.size() != 36) return false;
+    for (size_t i = 0; i < s.size(); i++) {
+        bool dash = i == 8 || i == 13 || i == 18 || i == 23;
+        bool ok = dash ? s[i] == L'-' : (s[i] < 128 && isxdigit((int)s[i]));
+        if (!ok) return false;
+    }
+    return true;
+}
+
+static std::wstring EncodeProjectDir(const std::wstring& folder) {
+    std::wstring out = folder;
+    for (auto& c : out)
+        if (!(c < 128 && isalnum((int)c))) c = L'-';
+    return out;
+}
+
+static std::wstring Utf8ToWide(const std::string& s) {
+    if (s.empty()) return L"";
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
+    std::wstring out(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), out.data(), n);
+    return out;
+}
+
+static void AppendUtf8(std::string& out, unsigned cp) {
+    if (cp < 0x80) {
+        out += (char)cp;
+    } else if (cp < 0x800) {
+        out += (char)(0xC0 | (cp >> 6));
+        out += (char)(0x80 | (cp & 0x3F));
+    } else {
+        out += (char)(0xE0 | (cp >> 12));
+        out += (char)(0x80 | ((cp >> 6) & 0x3F));
+        out += (char)(0x80 | (cp & 0x3F));
+    }
+}
+
+// Value of the JSON string that starts right after `marker` (e.g. "\"cwd\":\""), unescaped.
+// Returns empty when the marker is absent. Never throws.
+static std::string JsonString(const std::string& text, const char* marker) {
+    size_t i = text.find(marker);
+    if (i == std::string::npos) return {};
+    std::string out;
+    for (i += strlen(marker); i < text.size() && text[i] != '"'; i++) {
+        if (text[i] != '\\' || i + 1 >= text.size()) {
+            out += text[i];
+            continue;
+        }
+        char e = text[++i];
+        if (e == 'u' && i + 4 < text.size()) {
+            unsigned cp = 0;
+            for (size_t k = 1; k <= 4; k++) {
+                char h = text[i + k];
+                int v = (h >= '0' && h <= '9') ? h - '0' : (h >= 'a' && h <= 'f') ? h - 'a' + 10
+                      : (h >= 'A' && h <= 'F') ? h - 'A' + 10 : -1;
+                if (v < 0) { cp = 0xFFFD; break; }
+                cp = cp * 16 + v;
+            }
+            AppendUtf8(out, cp);
+            i += 4;
+        } else if (e == 'n') {
+            out += '\n';
+        } else if (e == 't') {
+            out += '\t';
+        } else {
+            out += e;  // \" \\ \/
+        }
+    }
+    return out;
+}
+
+// The start of a transcript. The cwd and the AI title are in the first lines; some lines are
+// huge hook attachments, so the read is capped.
+static std::string ReadHead(const std::wstring& path) {
+    constexpr DWORD kBytes = 512 * 1024;
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return {};
+    std::string buf(kBytes, '\0');
+    DWORD read = 0;
+    if (!ReadFile(f, buf.data(), kBytes, &read, nullptr)) read = 0;
+    CloseHandle(f);
+    buf.resize(read);
+    return buf;
+}
+
+// Trailing separators are ignored; the comparison is case-insensitive like Windows paths.
+static bool SameFolder(const std::wstring& a, const std::wstring& b) {
+    auto trim = [](std::wstring s) {
+        while (s.size() > 1 && (s.back() == L'\\' || s.back() == L'/')) s.pop_back();
+        return s;
+    };
+    return _wcsicmp(trim(a).c_str(), trim(b).c_str()) == 0;
+}
+
+static std::wstring FormatTime(FILETIME utc) {
+    FILETIME local{};
+    FileTimeToLocalFileTime(&utc, &local);
+    SYSTEMTIME st{};
+    FileTimeToSystemTime(&local, &st);
+    wchar_t buf[32];
+    swprintf_s(buf, L"%02d.%02d %02d:%02d", st.wDay, st.wMonth, st.wHour, st.wMinute);
+    return buf;
+}
+
+// The most recent sessions whose transcript was started in `folder`, newest first.
+static std::vector<Session> ScanSessions(const std::wstring& folder) {
+    std::vector<Session> out;
+    std::wstring base = EnvPath(L"USERPROFILE", L"\\.claude\\projects\\");
+    if (base.empty()) return out;
+    base += EncodeProjectDir(folder) + L"\\";
+
+    struct Candidate {
+        std::wstring id;
+        FILETIME mtime;
+    };
+    std::vector<Candidate> files;
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW((base + L"*.jsonl").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return out;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        std::wstring name = fd.cFileName;  // matches *.jsonl, so it ends with ".jsonl"
+        std::wstring id = name.substr(0, name.size() - 6);
+        // The id goes into a command line and a URL later, so only a plain UUID is accepted.
+        if (IsUuid(id)) files.push_back({id, fd.ftLastWriteTime});
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+
+    std::sort(files.begin(), files.end(), [](const Candidate& a, const Candidate& b) {
+        return CompareFileTime(&a.mtime, &b.mtime) > 0;
+    });
+    for (const Candidate& c : files) {
+        if (out.size() >= kMaxSessions) break;
+        std::string head = ReadHead(base + c.id + L".jsonl");
+        if (!SameFolder(Utf8ToWide(JsonString(head, "\"cwd\":\"")), folder)) continue;
+        std::wstring title = Utf8ToWide(JsonString(head, "\"aiTitle\":\""));
+        std::wstring label = FormatTime(c.mtime);
+        if (!title.empty()) label = title.substr(0, 60) + L" - " + label;
+        out.push_back({c.id, label});
+    }
+    return out;
+}
+
 // --- Windows Terminal's default profile --------------------------------------
 
 struct Profile {
@@ -258,8 +418,9 @@ static bool HasToken(const std::wstring& lower, std::initializer_list<const wcha
     return false;
 }
 
-// Command line that starts claude inside the profile's shell; empty for an unknown shell.
-static std::wstring ShellWithClaude(const Profile& p, const std::wstring& claude) {
+// Command line that starts claude (with `args`, e.g. " --resume <id>") inside the profile's shell;
+// empty for an unknown shell.
+static std::wstring ShellWithClaude(const Profile& p, const std::wstring& claude, const std::wstring& args) {
     std::wstring cmd = p.commandline;
     if (cmd.empty() && p.source == L"Windows.Terminal.PowershellCore") {
         wchar_t buf[MAX_PATH];
@@ -292,11 +453,11 @@ static std::wstring ShellWithClaude(const Profile& p, const std::wstring& claude
             if (c == L'\'') quoted += L'\'';
             quoted += c;
         }
-        return cmd + L" -NoExit -Command \"& '" + quoted + L"'\"";
+        return cmd + L" -NoExit -Command \"& '" + quoted + L"'" + args + L"\"";
     }
     if (base == L"cmd.exe" || base == L"cmd") {
         if (HasToken(lower, {L"/c", L"/k"})) return L"";
-        return cmd + L" /k \"" + claude + L"\"";
+        return cmd + L" /k \"" + claude + L"\"" + args;
     }
     return L"";
 }
@@ -311,9 +472,11 @@ static std::wstring EscapeWt(const std::wstring& s) {
     return o;
 }
 
-static HRESULT LaunchTerminal(const std::wstring& folder) {
+// Opens claude in `folder`; a non-empty resumeId resumes that session instead of starting a new one.
+static HRESULT LaunchTerminal(const std::wstring& folder, const std::wstring& resumeId) {
     std::wstring claude = ClaudeCliPath();
     if (claude.empty()) return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+    std::wstring claudeArgs = resumeId.empty() ? std::wstring() : L" --resume " + resumeId;
 
     std::wstring wt = EnvPath(L"LOCALAPPDATA", L"\\Microsoft\\WindowsApps\\wt.exe");
     if (!wt.empty() && FileExists(wt)) {
@@ -328,9 +491,9 @@ static HRESULT LaunchTerminal(const std::wstring& folder) {
         std::wstring inner;
         if (DefaultProfile(profile)) {
             args = L"-p \"" + profile.id + L"\" ";
-            inner = ShellWithClaude(profile, claude);
+            inner = ShellWithClaude(profile, claude, claudeArgs);
         }
-        if (inner.empty()) inner = L"\"" + claude + L"\"";
+        if (inner.empty()) inner = L"\"" + claude + L"\"" + claudeArgs;
         args += L"-d \"" + EscapeWt(dir) + L"\" " + EscapeWt(inner);
         HINSTANCE h = ShellExecuteW(nullptr, L"open", wt.c_str(), args.c_str(), folder.c_str(), SW_SHOWNORMAL);
         if ((INT_PTR)h > 32) return S_OK;
@@ -340,15 +503,93 @@ static HRESULT LaunchTerminal(const std::wstring& folder) {
     return (INT_PTR)h > 32 ? S_OK : HRESULT_FROM_WIN32(GetLastError());
 }
 
-static HRESULT LaunchDesktop(const std::wstring& folder) {
-    std::wstring url = L"claude://code/new?folder=" + UriEncode(folder);
+static HRESULT OpenUrl(const std::wstring& url) {
     HINSTANCE h = ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     return (INT_PTR)h > 32 ? S_OK : HRESULT_FROM_WIN32(GetLastError());
 }
 
+static HRESULT LaunchDesktop(const std::wstring& folder) {
+    return OpenUrl(L"claude://code/new?folder=" + UriEncode(folder));
+}
+
+// claude://resume imports a CLI transcript by its UUID and opens it in the desktop app.
+static HRESULT LaunchDesktopResume(const std::wstring& sessionId) {
+    return OpenUrl(L"claude://resume?session=" + sessionId);
+}
+
+static HRESULT Launch(Kind kind, const std::wstring& folder, const std::wstring& resumeId) {
+    if (kind == Kind::Terminal) return LaunchTerminal(folder, resumeId);
+    return resumeId.empty() ? LaunchDesktop(folder) : LaunchDesktopResume(resumeId);
+}
+
+// Root: the top-level entry. Its submenu holds New, a separator and one Resume per session.
+enum class Role { Root, New, Separator, Resume };
+
+// Enumerator of a submenu. It owns one reference to each child.
+class EnumCommands final : public IEnumExplorerCommand {
+public:
+    explicit EnumCommands(std::vector<IExplorerCommand*> items) : items_(std::move(items)) {
+        InterlockedIncrement(&g_objects);
+    }
+
+    // IUnknown
+    IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        if (riid == IID_IUnknown || riid == IID_IEnumExplorerCommand) {
+            *ppv = static_cast<IEnumExplorerCommand*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+    IFACEMETHODIMP_(ULONG) AddRef() override { return InterlockedIncrement(&refs_); }
+    IFACEMETHODIMP_(ULONG) Release() override {
+        ULONG r = InterlockedDecrement(&refs_);
+        if (r == 0) delete this;
+        return r;
+    }
+
+    // IEnumExplorerCommand
+    IFACEMETHODIMP Next(ULONG count, IExplorerCommand** out, ULONG* fetched) override {
+        ULONG n = 0;
+        while (n < count && pos_ < items_.size()) {
+            items_[pos_]->AddRef();
+            out[n++] = items_[pos_++];
+        }
+        if (fetched) *fetched = n;
+        return n == count ? S_OK : S_FALSE;
+    }
+    IFACEMETHODIMP Skip(ULONG count) override {
+        pos_ = (std::min)(items_.size(), pos_ + (size_t)count);
+        return S_OK;
+    }
+    IFACEMETHODIMP Reset() override {
+        pos_ = 0;
+        return S_OK;
+    }
+    IFACEMETHODIMP Clone(IEnumExplorerCommand** e) override {
+        if (e) *e = nullptr;
+        return E_NOTIMPL;
+    }
+
+private:
+    ~EnumCommands() {
+        for (IExplorerCommand* c : items_) c->Release();
+        InterlockedDecrement(&g_objects);
+    }
+    LONG refs_ = 1;
+    std::vector<IExplorerCommand*> items_;
+    size_t pos_ = 0;
+};
+
 class Command final : public IExplorerCommand, public IObjectWithSite {
 public:
-    explicit Command(Kind kind) : kind_(kind) { InterlockedIncrement(&g_objects); }
+    // `folder` is the clicked folder for a Resume child (the session's own folder).
+    Command(Kind kind, Role role, const Session& session = Session(), const std::wstring& folder = L"")
+        : kind_(kind), role_(role), session_(session), folder_(folder) {
+        InterlockedIncrement(&g_objects);
+    }
 
     // IUnknown
     IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
@@ -374,7 +615,18 @@ public:
     // IExplorerCommand
     // Title follows the Windows display language: Turkish, otherwise English.
     IFACEMETHODIMP GetTitle(IShellItemArray*, PWSTR* name) override {
+        *name = nullptr;
         bool tr = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_TURKISH;
+        switch (role_) {
+        case Role::Separator:
+            return E_NOTIMPL;
+        case Role::New:
+            return SHStrDupW(tr ? L"Yeni oturum" : L"New session", name);
+        case Role::Resume:
+            return SHStrDupW(session_.label.c_str(), name);
+        case Role::Root:
+            break;
+        }
         const wchar_t* title = kind_ == Kind::Terminal
             ? (tr ? L"Claude Code'da Aç" : L"Open in Claude Code")
             : (tr ? L"Claude Masaüstünde Aç" : L"Open in Claude Desktop");
@@ -403,27 +655,48 @@ public:
         return E_NOTIMPL;
     }
     IFACEMETHODIMP GetCanonicalName(GUID* guid) override {
+        if (role_ != Role::Root) return E_NOTIMPL;
         *guid = kind_ == Kind::Terminal ? CLSID_ClaudeTerminal : CLSID_ClaudeDesktop;
         return S_OK;
     }
-    IFACEMETHODIMP GetState(IShellItemArray*, BOOL, EXPCMDSTATE* state) override {
+    IFACEMETHODIMP GetState(IShellItemArray* items, BOOL, EXPCMDSTATE* state) override {
+        // The submenu is built from the clicked folder, and GetFlags/EnumSubCommands get no items.
+        if (role_ == Role::Root) {
+            std::wstring folder;
+            if (SUCCEEDED(TargetFolder(items, site_, folder)) && folder != folder_) {
+                folder_ = folder;
+                scanned_ = false;
+                sessions_.clear();
+            }
+        }
         bool available = kind_ == Kind::Terminal ? !ClaudeCliPath().empty() : !DesktopExePath().empty();
         *state = available ? ECS_ENABLED : ECS_HIDDEN;
         return S_OK;
     }
     IFACEMETHODIMP Invoke(IShellItemArray* items, IBindCtx*) override {
+        if (role_ == Role::Separator) return E_NOTIMPL;
+        if (role_ == Role::Resume) return Launch(kind_, folder_, session_.id);
         std::wstring folder;
         HRESULT hr = TargetFolder(items, site_, folder);
         if (FAILED(hr)) return hr;
-        return kind_ == Kind::Terminal ? LaunchTerminal(folder) : LaunchDesktop(folder);
+        return Launch(kind_, folder, L"");
     }
+    // The root has a submenu only when the folder has sessions; otherwise it stays a plain entry.
     IFACEMETHODIMP GetFlags(EXPCMDFLAGS* flags) override {
         *flags = ECF_DEFAULT;
+        if (role_ == Role::Separator) *flags = ECF_ISSEPARATOR;
+        else if (role_ == Role::Root && HasSessions()) *flags = ECF_HASSUBCOMMANDS;
         return S_OK;
     }
     IFACEMETHODIMP EnumSubCommands(IEnumExplorerCommand** e) override {
         *e = nullptr;
-        return E_NOTIMPL;
+        if (role_ != Role::Root || !HasSessions()) return E_NOTIMPL;
+        std::vector<IExplorerCommand*> children;
+        children.push_back(NewChild(Role::New, Session()));
+        children.push_back(NewChild(Role::Separator, Session()));
+        for (const Session& s : sessions_) children.push_back(NewChild(Role::Resume, s));
+        *e = new (std::nothrow) EnumCommands(std::move(children));
+        return *e ? S_OK : E_OUTOFMEMORY;
     }
 
     // IObjectWithSite
@@ -446,8 +719,32 @@ private:
         if (site_) site_->Release();
         InterlockedDecrement(&g_objects);
     }
+
+    // Sessions are read once per folder, the first time the root is asked for its flags.
+    bool HasSessions() {
+        if (folder_.empty()) return false;
+        if (!scanned_) {
+            sessions_ = ScanSessions(folder_);
+            scanned_ = true;
+        }
+        return !sessions_.empty();
+    }
+
+    // Children get the site so that New resolves the clicked folder when it is invoked.
+    IExplorerCommand* NewChild(Role role, const Session& session) {
+        Command* child = new (std::nothrow) Command(kind_, role, session, folder_);
+        if (!child) return nullptr;
+        child->SetSite(site_);
+        return child;
+    }
+
     LONG refs_ = 1;
     Kind kind_;
+    Role role_;
+    Session session_;
+    std::wstring folder_;  // Root: the clicked folder; Resume: the session's folder
+    std::vector<Session> sessions_;
+    bool scanned_ = false;
     IUnknown* site_ = nullptr;
 };
 
@@ -472,7 +769,7 @@ public:
     IFACEMETHODIMP CreateInstance(IUnknown* outer, REFIID riid, void** ppv) override {
         *ppv = nullptr;
         if (outer) return CLASS_E_NOAGGREGATION;
-        Command* cmd = new (std::nothrow) Command(kind_);
+        Command* cmd = new (std::nothrow) Command(kind_, Role::Root);
         if (!cmd) return E_OUTOFMEMORY;
         HRESULT hr = cmd->QueryInterface(riid, ppv);
         cmd->Release();
