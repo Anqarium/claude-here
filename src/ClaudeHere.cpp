@@ -682,6 +682,7 @@ public:
         return Launch(kind_, folder, L"");
     }
     // The root has a submenu only when the folder has sessions; otherwise it stays a plain entry.
+    // (ECF_HASSPLITBUTTON was tried: the new Windows 11 menu never invokes the root then.)
     IFACEMETHODIMP GetFlags(EXPCMDFLAGS* flags) override {
         *flags = ECF_DEFAULT;
         if (role_ == Role::Separator) *flags = ECF_ISSEPARATOR;

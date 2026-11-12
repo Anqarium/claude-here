@@ -52,5 +52,7 @@ can only be checked by hand.
   where `<dir>` is the folder path with every non-alphanumeric character replaced by `-` (checked
   on ASCII paths only). `cwd` and `aiTitle` are read from the first 512 KB. The submenu needs
   `GetState` to see the clicked folder first, because `GetFlags` and `EnumSubCommands` get no items.
+  `ECF_HASSPLITBUTTON` was tried and dropped: the new menu shows the arrow but never invokes the
+  root, so "New session" stays inside the submenu.
 - Desktop resume: `claude://resume?session=<uuid>` (host `resume`, read from app.asar). It imports
   the CLI transcript into a new desktop session with the history; the CLI session is untouched.
