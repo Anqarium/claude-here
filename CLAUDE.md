@@ -21,7 +21,9 @@ user in chat stay in Turkish.
 
 There are no automated tests. The COM side was checked with a throwaway probe that calls
 `CoCreateInstance` + `GetTitle`/`GetIcon`/`GetState`/`Invoke` on both CLSIDs; the menu itself
-can only be checked by hand.
+can only be checked by hand. Without installing, a probe can `LoadLibrary` `build\ClaudeHere.dll`,
+call its `DllGetClassObject`, then `GetState` on a folder and `EnumSubCommands` to list the
+session submenu. Installed copies are `%LOCALAPPDATA%\ClaudeHere\{Terminal,Desktop}\ClaudeHere.dll`.
 
 ## Notes
 
