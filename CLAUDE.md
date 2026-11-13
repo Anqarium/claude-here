@@ -46,6 +46,10 @@ session submenu. Installed copies are `%LOCALAPPDATA%\ClaudeHere\{Terminal,Deskt
   and trailing commas are stripped, then `Windows.Data.Json`), passes `defaultProfile` with
   `-p` and runs claude inside the profile's shell. If the profile already carries a command
   (`-Command`, `/c`, …), claude runs directly instead.
+- Desktop app detection: the MSIX package `Claude_pzs8sxrjxfjjc` first, then the per-user
+  Squirrel setup's launcher `%LOCALAPPDATA%\AnthropicClaude\claude.exe` (a reinstall can switch
+  from one to the other; without a match `GetState` hides the entry). Change both in
+  `src/ClaudeHere.cpp` and `install.ps1`, and re-run `install.ps1` so the icon is regenerated.
 - Desktop entry: `claude://code/new?folder=<encodeURIComponent>` is the format the desktop
   app's own `ccd` alias produces (read from its app.asar). The app adds `src=external` and
   always asks for confirmation; this cannot be bypassed. Its "Trust this workspace?" answer

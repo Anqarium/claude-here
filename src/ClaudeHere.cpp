@@ -63,10 +63,14 @@ static std::wstring ClaudeCliPath() {
 }
 
 // Path of the Claude desktop app's exe; empty when it is not installed.
+// The MSIX package first, then the per-user Squirrel install's stable launcher.
 static std::wstring DesktopExePath() {
     UINT32 count = 0, bufLen = 0;
     LONG rc = FindPackagesByPackageFamily(kDesktopFamily, PACKAGE_FILTER_HEAD, &count, nullptr, &bufLen, nullptr, nullptr);
-    if (rc != ERROR_INSUFFICIENT_BUFFER || count == 0) return L"";
+    if (rc != ERROR_INSUFFICIENT_BUFFER || count == 0) {
+        std::wstring squirrel = EnvPath(L"LOCALAPPDATA", L"\\AnthropicClaude\\claude.exe");
+        return !squirrel.empty() && FileExists(squirrel) ? squirrel : L"";
+    }
     std::vector<PWSTR> names(count);
     std::vector<wchar_t> buf(bufLen);
     if (FindPackagesByPackageFamily(kDesktopFamily, PACKAGE_FILTER_HEAD, &count, names.data(), &bufLen, buf.data(), nullptr) != ERROR_SUCCESS)

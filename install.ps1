@@ -14,6 +14,9 @@ Add-Type -AssemblyName System.Drawing
 function Find-DesktopExe {
   $pkg = Get-AppxPackage -Name Claude | Where-Object PackageFamilyName -eq 'Claude_pzs8sxrjxfjjc' | Select-Object -First 1
   if ($pkg) { $exe = Join-Path $pkg.InstallLocation 'app\Claude.exe'; if (Test-Path $exe) { return $exe } }
+  # Per-user Squirrel install (the downloadable setup exe); claude.exe here is a stable launcher.
+  $exe = Join-Path $env:LOCALAPPDATA 'AnthropicClaude\claude.exe'
+  if (Test-Path $exe) { return $exe }
   return $null
 }
 

@@ -63,7 +63,7 @@ each can be moved in or out of the main menu on its own under **Settings → Per
 - Visual Studio 2022 with the C++ tools, and the Windows 11 SDK
   (`winget install Microsoft.WindowsSDK.10.0.26100`).
 - Claude Code CLI (`%USERPROFILE%\.local\bin\claude.exe` or on `PATH`), and optionally the
-  Claude desktop app.
+  Claude desktop app (the MSIX package or the per-user setup in `%LOCALAPPDATA%\AnthropicClaude`).
 
 ## Install
 
